@@ -1,0 +1,129 @@
+# CompDash — Windsurf Coding Rules
+# Microinverter Telemetry Comparison Dashboard
+
+## Project Context
+Pure client-side React SPA for comparing microinverter telemetry data across solar sites.
+No backend. All computation runs in the browser via DuckDB-WASM.
+Data is uploaded by users as CSV/Excel each session and never leaves the browser.
+
+## Tech Stack — DO NOT deviate
+
+### Frontend
+- React 18 + Vite + TypeScript (strict mode)
+- React Router v6 with <HashRouter> (required for GitHub Pages)
+- Zustand for global state
+- TanStack Query (React Query v5) for async DuckDB query state
+
+### Styling
+- TailwindCSS — ALL styling via utility classes
+- shadcn/ui — ALL UI components (buttons, dropdowns, tables, cards, tabs, sliders, modals)
+- Lucide React for icons
+- NO CSS modules, NO inline styles, NO styled-components
+
+### Charts
+- Apache ECharts via echarts-for-react — ALL charts, Canvas renderer
+- NO Recharts, NO Chart.js, NO Plotly
+
+### Data & Computation
+- @duckdb/duckdb-wasm — ALL aggregation and filtering run as SQL
+- Papa Parse — CSV parsing
+- SheetJS (xlsx) — Excel .xlsx/.xls import and export
+- lz-string — URL state compression for shareable links
+
+### Export
+- html2canvas + jsPDF — client-side PDF export
+- SheetJS — Excel export
+- ECharts built-in saveAsImage — PNG chart export
+
+### Date Handling
+- date-fns — ALL date parsing, formatting, arithmetic
+- NO moment.js, NO dayjs
+
+## Architecture Rules
+
+1. DuckDB is the single source of truth — never aggregate arrays in JavaScript, write SQL.
+2. DuckDB singleton initialized once in src/lib/duckdb.ts; all queries via query(sql, params) helper.
+3. dc_power and ac_power are NOT stored columns — computed at query time as SQL expressions.
+4. Column mapping persists in localStorage under key compdash_column_mapping.
+5. No prop drilling — pages read from Zustand store only.
+6. All SQL queries are named constants in src/lib/queries.ts.
+7. No hardcoded data — no fixture files in production code (sample CSV only in public/sample/).
+8. Use <HashRouter> not <BrowserRouter> — GitHub Pages requires hash-based routing.
+
+## Internal Data Schema
+
+DuckDB table name: telemetry
+
+Columns:
+  serial_number   VARCHAR    12-digit microinverter ID (primary key)
+  site_id         VARCHAR    Site identifier (secondary key)
+  timestamp       TIMESTAMP  Local time, 5 or 15-min granularity
+  ac_voltage      DOUBLE     Volts
+  ac_frequency    DOUBLE     Hz
+  temperature_f   DOUBLE     Degrees Fahrenheit
+  dc_current      DOUBLE     Amps
+  dc_voltage      DOUBLE     Volts
+  duration        DOUBLE     Seconds
+  energy_produced DOUBLE     Wh
+  sku_name        VARCHAR    Optional model name (NULL if not provided)
+
+Calculated at query time (never stored):
+  dc_power  = dc_current * dc_voltage               (Watts)
+  ac_power  = (duration * energy_produced) / 3600.0  (Watts)
+
+## Folder Structure
+
+src/
+├── components/
+│   ├── upload/      Dropzone, ColumnMapper, SKUMapper, DataPreview
+│   ├── charts/      LineChart, BarChart, HeatmapChart, ScatterChart (ECharts wrappers)
+│   ├── filters/     DateRangePicker, SiteSelector, InverterSelector, GranularityToggle, MetricPicker
+│   ├── export/      ExportPDF, ExportExcel, ExportPNG, ShareLinkButton
+│   └── layout/      AppSidebar, TopNav, PageWrapper, KPICard
+├── hooks/           useSiteStats, useInverterStats, useTimeSeries, useAnomalies
+├── lib/
+│   ├── duckdb.ts    Singleton init, query(), ingestData()
+│   ├── parsers.ts   CSV/Excel → raw row arrays
+│   ├── schema.ts    Column mapper logic, validation, fuzzy name matching
+│   ├── queries.ts   All named SQL query string constants
+│   ├── shareLink.ts lz-string URL encode/decode
+│   └── exportUtils.ts PDF/Excel generation helpers
+├── pages/
+│   ├── UploadPage.tsx
+│   ├── OverviewPage.tsx
+│   ├── SiteComparisonPage.tsx
+│   ├── InverterDrilldownPage.tsx
+│   ├── TimeSeriesPage.tsx
+│   └── AnomalyPage.tsx
+├── store/
+│   ├── dataStore.ts   sites[], inverters[], dateRange, isDataLoaded
+│   └── uiStore.ts     selectedSites, selectedInverters, granularity, metric
+└── main.tsx
+
+## Code Conventions
+
+- TypeScript strict mode: no any, no @ts-ignore
+- ECharts options typed with: import type { EChartsOption } from 'echarts'
+- Component files: PascalCase (ColumnMapper.tsx)
+- Lib and hook files: camelCase (parsers.ts, useTimeSeries.ts)
+- SQL constants in queries.ts: SCREAMING_SNAKE_CASE
+- All async DuckDB queries wrapped in TanStack Query hooks inside hooks/
+
+## DO NOT
+
+- Do NOT add any backend, server, or API endpoint
+- Do NOT use Redux, MobX, or React Context for global state (Zustand only)
+- Do NOT use Recharts, Chart.js, Plotly, or any chart lib other than ECharts
+- Do NOT use moment.js
+- Do NOT use <BrowserRouter> — use <HashRouter> only
+- Do NOT store uploaded user data in localStorage or any remote service
+- Do NOT hardcode serial numbers, site IDs, or any domain-specific values
+- Do NOT use CSS modules or styled-components
+
+## Deployment
+
+Platform:      GitHub Pages
+CI/CD:         GitHub Actions at .github/workflows/deploy.yml
+Build command: npm run build  (output: dist/)
+Vite base:     Set to repo name e.g. base: '/CompDash/' in vite.config.ts
+Router:        <HashRouter> mandatory
