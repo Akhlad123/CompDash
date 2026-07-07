@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { query } from '@/lib/duckdb'
-import { QUERY_DAILY_SITE_ENERGY } from '@/lib/queries'
+import { buildDailyEnergyQuery } from '@/lib/queries'
 import { useDataStore } from '@/store/dataStore'
 
 export interface DailySiteEnergyRow {
@@ -11,10 +11,14 @@ export interface DailySiteEnergyRow {
 
 export function useDailySiteEnergy() {
   const isDataLoaded = useDataStore((s) => s.isDataLoaded)
+  const dateRange = useDataStore((s) => s.dateRange)
 
   return useQuery<DailySiteEnergyRow[]>({
-    queryKey: ['dailySiteEnergy'],
-    queryFn: () => query<DailySiteEnergyRow>(QUERY_DAILY_SITE_ENERGY),
+    queryKey: ['dailySiteEnergy', dateRange?.from?.toISOString(), dateRange?.to?.toISOString()],
+    queryFn: () => {
+      const sql = buildDailyEnergyQuery(dateRange)
+      return query<DailySiteEnergyRow>(sql)
+    },
     enabled: isDataLoaded,
   })
 }

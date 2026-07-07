@@ -7,6 +7,8 @@
 ![ECharts](https://img.shields.io/badge/ECharts-6-AA344D)
 ![DuckDB](https://img.shields.io/badge/DuckDB--WASM-In--Browser_SQL-FFC107)
 
+> *Dashboard for analyzing Microinverter telemetry data*
+
 A fully client-side dashboard for analyzing and comparing microinverter telemetry data. Upload CSV/Excel files and instantly explore performance across sites and inverters — no backend required.
 
 **Live Demo:** [https://Akhlad123.github.io/CompDash/](https://Akhlad123.github.io/CompDash/)
@@ -15,13 +17,48 @@ A fully client-side dashboard for analyzing and comparing microinverter telemetr
 
 ## Features
 
-- **Upload & Map** — Drag-and-drop CSV/Excel with automatic column mapping and fuzzy matching
-- **Overview** — KPI cards, site summary table with 7-day sparklines
-- **Site Comparison** — Multi-site overlay/side-by-side line charts with brush/zoom
-- **Inverter Drilldown** — Z-score anomaly status badges, energy bar chart, multi-inverter overlay
-- **Time Series** — By-site or by-inverter mode, markLine means, DataZoom, collapsible stats
-- **Anomaly Detection** — Z-score threshold slider, flagged inverter table, heatmap, distribution chart
-- **Export** — PDF, PNG, Excel export + shareable URL with compressed state
+### Data Ingestion
+- **Drag-and-drop** CSV/Excel upload with automatic column mapping and fuzzy matching
+- **Resilient ingestion** — malformed rows are skipped individually instead of failing entire batches
+- **Session persistence** — data survives page reloads via DuckDB session storage
+- **Flexible date parsing** — handles various `local_date` formats (M/D/YY, YYYY-MM-DD, null)
+
+### Computed Metrics
+- **DC Power** — `DC Voltage × DC Current` (W), computed at query time
+- **AC Power** — `Energy Produced × 3600 / Duration` (W), computed at query time
+- Both are available in all metric selectors, charts, and threshold analysis
+
+### Pages
+
+| Page | Description |
+|------|-------------|
+| **Upload** | File import, column mapping, data preview, DuckDB ingestion |
+| **Overview** | KPI cards (total energy, sites, inverters, date range), site summary table with 7-day sparklines |
+| **Site Comparison** | Multi-site line charts with overlay or split view, summary statistics |
+| **Inverter Drilldown** | Z-score anomaly badges, energy bar chart, threshold analysis, multi-inverter comparison |
+| **Time Series** | By-site or by-inverter mode, markLine means, DataZoom, collapsible statistics |
+| **Anomaly Detection** | Z-score threshold slider, flagged inverter table, heatmap, distribution chart |
+| **Developer** | Advanced multi-axis chart builder with drag-and-drop metrics, per-metric statistics |
+
+### Threshold Analysis
+- **Above**: Computes marginal energy above a threshold — `SUM((param − threshold) × duration / 3600)` for rows where the parameter exceeds the threshold
+- **Below**: Identifies days where the parameter *never crossed* the threshold, then sums energy for those days
+- Supports **multiple parameters** with AND/OR logic and customizable threshold values
+- Works with DC Power, AC Power, AC Voltage, AC Frequency, Temperature, DC Current, DC Voltage
+
+### Multi-Metric Charting
+- Select up to 4 metrics simultaneously in Site Comparison, Time Series, Inverter Drilldown, and Developer pages
+- **Overlay mode** (default): All metrics on a single chart with multiple Y-axes
+- **Split mode**: Separate chart per metric — toggle with Overlay/Split buttons
+
+### Cross-Site Inverter Comparison
+- Compare inverters from **different sites** in Inverter Drilldown and Time Series
+- Multi-site selector in Time Series "By Inverter" mode
+- "Compare across sites" button in Inverter Drilldown detail panel
+
+### Statistics & Export
+- Statistics tables show **Total/Sum only for Energy** — other metrics display mean, max, min, std dev
+- **Export**: PDF, PNG, Excel export + shareable URL with compressed state
 
 ## Tech Stack
 
@@ -87,12 +124,13 @@ src/
 ├── components/
 │   ├── charts/       # LineChart, BarChart, HeatmapChart
 │   ├── export/       # ExportToolbar, ShareLinkButton, ExportPDF/Excel
-│   ├── filters/      # DateRangePicker, GranularityToggle, SiteSelector, etc.
-│   ├── layout/       # PageWrapper, AppSidebar, KPICard
-│   └── upload/       # ColumnMapper, DropZone
-├── hooks/            # TanStack Query hooks wrapping DuckDB queries
-├── lib/              # duckdb, queries, parsers, schema, exportUtils, shareLink
-├── pages/            # UploadPage, OverviewPage, SiteComparisonPage, etc.
+│   ├── filters/      # DateRangePicker, GranularityToggle, SiteSelector, MetricPicker, MultiMetricPicker
+│   ├── layout/       # PageWrapper, AppSidebar, ThemeToggle, KPICard
+│   └── upload/       # ColumnMapper, DropZone, DataPreview
+├── hooks/            # TanStack Query hooks (useMultiMetricTimeSeries, useInverterStats, etc.)
+├── lib/              # duckdb, queries, parsers, schema, exportUtils, shareLink, sessionStore
+├── pages/            # UploadPage, OverviewPage, SiteComparisonPage, InverterDrilldownPage,
+│                     #   TimeSeriesPage, AnomalyPage, DeveloperPage
 └── store/            # dataStore (Zustand), uiStore (Zustand)
 ```
 

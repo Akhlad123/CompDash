@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { query } from '@/lib/duckdb'
-import { QUERY_KPI_TOTALS } from '@/lib/queries'
+import { buildKPIQuery } from '@/lib/queries'
 import { useDataStore } from '@/store/dataStore'
 
 export interface KPITotalsRow {
@@ -13,11 +13,13 @@ export interface KPITotalsRow {
 
 export function useKPITotals() {
   const isDataLoaded = useDataStore((s) => s.isDataLoaded)
+  const dateRange = useDataStore((s) => s.dateRange)
 
   return useQuery<KPITotalsRow | null>({
-    queryKey: ['kpiTotals'],
+    queryKey: ['kpiTotals', dateRange?.from?.toISOString(), dateRange?.to?.toISOString()],
     queryFn: async () => {
-      const rows = await query<KPITotalsRow>(QUERY_KPI_TOTALS)
+      const sql = buildKPIQuery(dateRange)
+      const rows = await query<KPITotalsRow>(sql)
       return rows[0] ?? null
     },
     enabled: isDataLoaded,

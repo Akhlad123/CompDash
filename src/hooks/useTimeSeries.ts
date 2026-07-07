@@ -19,11 +19,12 @@ export function useTimeSeries(
   inverterIds: string[] = []
 ) {
   const isDataLoaded = useDataStore((s) => s.isDataLoaded)
+  const dateRange = useDataStore((s) => s.dateRange)
 
   return useQuery<TimeSeriesRow[]>({
-    queryKey: ['timeseries', metric, granularity, siteIds, inverterIds],
+    queryKey: ['timeseries', metric, granularity, siteIds, inverterIds, dateRange?.from?.toISOString(), dateRange?.to?.toISOString()],
     queryFn: () => {
-      const sql = buildTimeseriesQuery(metric, granularity, siteIds, inverterIds)
+      const sql = buildTimeseriesQuery(metric, granularity, siteIds, inverterIds, dateRange)
       return query<TimeSeriesRow>(sql)
     },
     enabled: isDataLoaded && siteIds.length > 0,

@@ -9,10 +9,10 @@ import { useUIStore } from '@/store/uiStore'
 import type { MetricKey } from '@/lib/queries'
 
 const METRIC_OPTIONS: { value: MetricKey; label: string }[] = [
-  { value: 'ac_power', label: 'AC Power' },
   { value: 'dc_power', label: 'DC Power' },
+  { value: 'ac_power', label: 'AC Power' },
   { value: 'energy_produced', label: 'Energy Produced' },
-  { value: 'temperature_f', label: 'Temperature' },
+  { value: 'temperature_c', label: 'Temperature' },
   { value: 'ac_voltage', label: 'AC Voltage' },
   { value: 'ac_frequency', label: 'AC Frequency' },
   { value: 'dc_current', label: 'DC Current' },

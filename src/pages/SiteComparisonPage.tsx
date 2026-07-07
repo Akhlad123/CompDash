@@ -1,6 +1,5 @@
 import { useMemo, useState, useEffect } from 'react'
-import { Navigate } from 'react-router-dom'
-import { Loader2, Layers, LayoutGrid } from 'lucide-react'
+import { Loader2, Layers, LayoutGrid, ExternalLink } from 'lucide-react'
 import type { EChartsOption } from 'echarts'
 import { Button } from '@/components/ui/button'
 import {
@@ -15,13 +14,14 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import SiteSelector from '@/components/filters/SiteSelector'
 import DateRangePicker from '@/components/filters/DateRangePicker'
 import GranularityToggle from '@/components/filters/GranularityToggle'
-import MetricPicker from '@/components/filters/MetricPicker'
+import MultiMetricPicker from '@/components/filters/MultiMetricPicker'
 import LineChart from '@/components/charts/LineChart'
 import ExportToolbar from '@/components/export/ExportToolbar'
 import { useDataStore } from '@/store/dataStore'
 import { useUIStore } from '@/store/uiStore'
-import { useTimeSeries } from '@/hooks/useTimeSeries'
-import type { TimeSeriesRow } from '@/hooks/useTimeSeries'
+import { useMultiMetricTimeSeries } from '@/hooks/useMultiMetricTimeSeries'
+import type { MultiMetricTimeSeriesRow } from '@/hooks/useMultiMetricTimeSeries'
+import type { MetricKey } from '@/lib/queries'
 
 const SITE_COLORS = [
   '#3b82f6', '#ef4444', '#22c55e', '#f59e0b',
@@ -30,16 +30,35 @@ const SITE_COLORS = [
 ]
 
 const METRIC_LABELS: Record<string, string> = {
-  ac_power: 'AC Power (W)',
   dc_power: 'DC Power (W)',
-  energy_produced: 'Energy (Wh)',
-  temperature_f: 'Temperature (°F)',
+  ac_power: 'AC Power (W)',
+  energy_produced: 'Energy (kWh)',
+  temperature_c: 'Temperature (°C)',
   ac_voltage: 'AC Voltage (V)',
   ac_frequency: 'AC Frequency (Hz)',
+  dc_current: 'DC Current (A)',
+  dc_voltage: 'DC Voltage (V)',
 }
 
-function fmt(n: number): string {
-  return n.toLocaleString(undefined, { maximumFractionDigits: 1 })
+const METRIC_STAT_LABELS: Record<string, { name: string; unit: string }> = {
+  dc_power: { name: 'DC Power', unit: 'W' },
+  ac_power: { name: 'AC Power', unit: 'W' },
+  energy_produced: { name: 'Energy Produced', unit: 'kWh' },
+  temperature_c: { name: 'Temperature', unit: '°C' },
+  ac_voltage: { name: 'AC Voltage', unit: 'V' },
+  ac_frequency: { name: 'AC Frequency', unit: 'Hz' },
+  dc_current: { name: 'DC Current', unit: 'A' },
+  dc_voltage: { name: 'DC Voltage', unit: 'V' },
+}
+
+function safe(n: unknown): number {
+  if (n === null || n === undefined) return 0
+  const v = Number(n)
+  return Number.isFinite(v) ? v : 0
+}
+
+function fmt(n: unknown): string {
+  return safe(n).toLocaleString(undefined, { maximumFractionDigits: 1 })
 }
 
 export default function SiteComparisonPage() {
@@ -50,7 +69,8 @@ export default function SiteComparisonPage() {
   const granularity = useUIStore((s) => s.granularity)
   const metric = useUIStore((s) => s.metric)
 
-  const [displayMode, setDisplayMode] = useState<'overlay' | 'sideBySide'>('overlay')
+  const [selectedMetrics, setSelectedMetrics] = useState<MetricKey[]>([metric])
+  const [chartMode, setChartMode] = useState<'overlay' | 'split'>('overlay')
 
   // Default: select all sites if none selected
   useEffect(() => {
@@ -59,29 +79,19 @@ export default function SiteComparisonPage() {
     }
   }, [allSites, selectedSites.length, setSelectedSites])
 
-  const { data: tsData, isLoading: tsLoading } = useTimeSeries(
+  const { results: metricResults, isLoading: tsLoading } = useMultiMetricTimeSeries(
     selectedSites,
-    metric,
+    selectedMetrics,
     granularity
   )
 
-  const { data: voltageData } = useTimeSeries(
-    selectedSites,
-    'ac_voltage',
-    granularity
-  )
-
-  const { data: freqData } = useTimeSeries(
-    selectedSites,
-    'ac_frequency',
-    granularity
-  )
+  const tsData = metricResults[0]?.data as MultiMetricTimeSeriesRow[] | undefined
 
   // ── Group time series by site ──────────────────────────────────────
 
   const siteSeriesMap = useMemo(() => {
-    if (!tsData) return new Map<string, TimeSeriesRow[]>()
-    const map = new Map<string, TimeSeriesRow[]>()
+    if (!tsData) return new Map<string, MultiMetricTimeSeriesRow[]>()
+    const map = new Map<string, MultiMetricTimeSeriesRow[]>()
     for (const row of tsData) {
       const list = map.get(row.site_id) ?? []
       list.push(row)
@@ -95,7 +105,7 @@ export default function SiteComparisonPage() {
   const summaryStats = useMemo(() => {
     return selectedSites.map((siteId, idx) => {
       const rows = siteSeriesMap.get(siteId) ?? []
-      const values = rows.map((r) => r.metric_value).filter((v) => v != null)
+      const values = rows.map((r) => safe(r.metric_value)).filter((v) => v !== 0)
       const sum = values.reduce((a, b) => a + b, 0)
       const mean = values.length > 0 ? sum / values.length : 0
       const max = values.length > 0 ? Math.max(...values) : 0
@@ -105,7 +115,7 @@ export default function SiteComparisonPage() {
           ? values.reduce((a, v) => a + (v - mean) ** 2, 0) / values.length
           : 0
       const stdDev = Math.sqrt(variance)
-      const totalEnergy = rows.reduce((a, r) => a + r.metric_value, 0)
+      const totalEnergy = rows.reduce((a, r) => a + safe(r.metric_value), 0)
       return { siteId, mean, max, min, stdDev, totalEnergy, count: values.length, idx }
     })
   }, [selectedSites, siteSeriesMap])
@@ -117,133 +127,119 @@ export default function SiteComparisonPage() {
     ).siteId
   }, [summaryStats])
 
-  // ── Chart options ─────────────────────────────────────────────────
+  // ── Chart options ──────────────────────────────────────────
 
-  const overlayOption = useMemo((): EChartsOption => {
-    const buckets = tsData
-      ? [...new Set(tsData.map((r) => r.bucket))].sort()
-      : []
+  // Overlay: single chart with multi Y-axes
+  const overlayChartOption = useMemo((): EChartsOption => {
+    if (selectedMetrics.length === 0) return {}
 
-    const series = selectedSites.map((siteId, idx) => {
-      const rows = siteSeriesMap.get(siteId) ?? []
-      const dataMap = new Map(rows.map((r) => [r.bucket, r.metric_value]))
-      return {
-        name: siteId,
-        type: 'line' as const,
-        smooth: true,
-        symbol: 'none',
-        data: buckets.map((b) => dataMap.get(b) ?? null),
-        lineStyle: { color: SITE_COLORS[idx % SITE_COLORS.length] },
-        itemStyle: { color: SITE_COLORS[idx % SITE_COLORS.length] },
-      }
-    })
+    const allBuckets = new Set<string>()
+    const seriesArr: { metricKey: MetricKey; siteId: string; dataMap: Map<string, number> }[] = []
 
-    return {
-      tooltip: {
-        trigger: 'axis',
-        axisPointer: { type: 'cross' },
-      },
-      legend: { top: 0 },
-      grid: { top: 40, right: 20, bottom: 60, left: 60 },
-      xAxis: {
-        type: 'category',
-        data: buckets,
-        axisLabel: { rotate: 30, fontSize: 10 },
-      },
-      yAxis: {
-        type: 'value',
-        name: METRIC_LABELS[metric] ?? metric,
-      },
-      dataZoom: [{ type: 'inside' }, { type: 'slider', bottom: 5 }],
-      series,
-    }
-  }, [tsData, selectedSites, siteSeriesMap, metric])
-
-  const sideBySideOptions = useMemo((): EChartsOption[] => {
-    const buckets = tsData
-      ? [...new Set(tsData.map((r) => r.bucket))].sort()
-      : []
-
-    // Find global Y range
-    const allValues = tsData?.map((r) => r.metric_value) ?? []
-    const yMin = allValues.length > 0 ? Math.min(...allValues) * 0.95 : 0
-    const yMax = allValues.length > 0 ? Math.max(...allValues) * 1.05 : 100
-
-    return selectedSites.map((siteId, idx) => {
-      const rows = siteSeriesMap.get(siteId) ?? []
-      const dataMap = new Map(rows.map((r) => [r.bucket, r.metric_value]))
-      return {
-        title: { text: siteId, left: 'center', textStyle: { fontSize: 13 } },
-        tooltip: { trigger: 'axis' },
-        grid: { top: 35, right: 15, bottom: 45, left: 50 },
-        xAxis: {
-          type: 'category',
-          data: buckets,
-          axisLabel: { rotate: 30, fontSize: 9 },
-        },
-        yAxis: { type: 'value', min: yMin, max: yMax },
-        dataZoom: [{ type: 'inside' }],
-        series: [
-          {
-            type: 'line',
-            smooth: true,
-            symbol: 'none',
-            data: buckets.map((b) => dataMap.get(b) ?? null),
-            lineStyle: { color: SITE_COLORS[idx % SITE_COLORS.length] },
-            areaStyle: { color: SITE_COLORS[idx % SITE_COLORS.length] + '20' },
-          },
-        ],
-      } as EChartsOption
-    })
-  }, [tsData, selectedSites, siteSeriesMap])
-
-  // ── Secondary strips ──────────────────────────────────────────────
-
-  function buildSecondaryOption(
-    data: TimeSeriesRow[] | undefined,
-    label: string
-  ): EChartsOption {
-    const buckets = data
-      ? [...new Set(data.map((r) => r.bucket))].sort()
-      : []
-    const grouped = new Map<string, Map<string, number>>()
-    if (data) {
+    selectedMetrics.forEach((m, mIdx) => {
+      const data = metricResults[mIdx]?.data as MultiMetricTimeSeriesRow[] | undefined
+      if (!data) return
       for (const row of data) {
-        const m = grouped.get(row.site_id) ?? new Map()
-        m.set(row.bucket, row.metric_value)
-        grouped.set(row.site_id, m)
+        allBuckets.add(String(row.bucket))
       }
-    }
+      const grouped = new Map<string, Map<string, number>>()
+      for (const row of data) {
+        const sMap = grouped.get(row.site_id) ?? new Map()
+        sMap.set(String(row.bucket), safe(row.metric_value))
+        grouped.set(row.site_id, sMap)
+      }
+      for (const site of selectedSites) {
+        seriesArr.push({ metricKey: m, siteId: site, dataMap: grouped.get(site) ?? new Map() })
+      }
+    })
 
-    const series = selectedSites.map((siteId, idx) => {
-      const dataMap = grouped.get(siteId) ?? new Map()
+    if (allBuckets.size === 0) return {}
+    const buckets = [...allBuckets].sort()
+
+    const yAxes = selectedMetrics.map((m, idx) => ({
+      type: 'value' as const,
+      name: METRIC_LABELS[m] ?? m,
+      nameTextStyle: { fontSize: 10 },
+      position: idx % 2 === 0 ? ('left' as const) : ('right' as const),
+      offset: Math.floor(idx / 2) * 60,
+      splitLine: { show: idx === 0 },
+    }))
+
+    const series = seriesArr.map((sd, idx) => {
+      const yAxisIndex = selectedMetrics.indexOf(sd.metricKey)
+      const label = METRIC_LABELS[sd.metricKey] ?? sd.metricKey
       return {
-        name: siteId,
+        name: `${label} — ${sd.siteId}`,
         type: 'line' as const,
         smooth: true,
         symbol: 'none',
-        data: buckets.map((b) => dataMap.get(b) ?? null),
+        yAxisIndex,
+        data: buckets.map((b) => sd.dataMap.get(b) ?? null),
         lineStyle: { color: SITE_COLORS[idx % SITE_COLORS.length], width: 1.5 },
         itemStyle: { color: SITE_COLORS[idx % SITE_COLORS.length] },
       }
     })
 
     return {
-      tooltip: { trigger: 'axis' },
-      legend: { top: 0, textStyle: { fontSize: 10 } },
-      grid: { top: 30, right: 15, bottom: 30, left: 55 },
-      xAxis: {
-        type: 'category',
-        data: buckets,
-        axisLabel: { fontSize: 9, rotate: 20 },
-      },
-      yAxis: { type: 'value', name: label, nameTextStyle: { fontSize: 10 } },
+      tooltip: { trigger: 'axis', axisPointer: { type: 'cross' } },
+      legend: { top: 0, type: 'scroll', textStyle: { fontSize: 10 } },
+      grid: { top: 50, right: selectedMetrics.length > 2 ? 120 : 60, bottom: 60, left: selectedMetrics.length > 2 ? 120 : 65 },
+      xAxis: { type: 'category', data: buckets, axisLabel: { rotate: 30, fontSize: 10 } },
+      yAxis: yAxes,
+      dataZoom: [{ type: 'inside' }, { type: 'slider', bottom: 5 }],
       series,
     }
-  }
+  }, [selectedMetrics, metricResults, selectedSites])
+
+  // Split: one chart per metric
+  const splitChartOptions = useMemo((): { metric: MetricKey; option: EChartsOption }[] => {
+    return selectedMetrics.map((m, mIdx) => {
+      const data = metricResults[mIdx]?.data as MultiMetricTimeSeriesRow[] | undefined
+      if (!data || data.length === 0) return { metric: m, option: {} }
+
+      const buckets = [...new Set(data.map((r) => String(r.bucket)))].sort()
+
+      const grouped = new Map<string, Map<string, number>>()
+      for (const row of data) {
+        const sMap = grouped.get(row.site_id) ?? new Map()
+        sMap.set(String(row.bucket), safe(row.metric_value))
+        grouped.set(row.site_id, sMap)
+      }
+
+      const series = selectedSites.map((siteId, idx) => {
+        const dataMap = grouped.get(siteId) ?? new Map()
+        return {
+          name: siteId,
+          type: 'line' as const,
+          smooth: true,
+          symbol: 'none',
+          data: buckets.map((b) => dataMap.get(b) ?? null),
+          lineStyle: { color: SITE_COLORS[idx % SITE_COLORS.length] },
+          itemStyle: { color: SITE_COLORS[idx % SITE_COLORS.length] },
+        }
+      })
+
+      return {
+        metric: m,
+        option: {
+          tooltip: { trigger: 'axis', axisPointer: { type: 'cross' } },
+          legend: { top: 0 },
+          grid: { top: 40, right: 20, bottom: 60, left: 60 },
+          xAxis: { type: 'category', data: buckets, axisLabel: { rotate: 30, fontSize: 10 } },
+          yAxis: { type: 'value', name: METRIC_LABELS[m] ?? m },
+          dataZoom: [{ type: 'inside' }, { type: 'slider', bottom: 5 }],
+          series,
+        } as EChartsOption,
+      }
+    })
+  }, [selectedMetrics, metricResults, selectedSites])
 
   if (!isDataLoaded) {
-    return <Navigate to="/" replace />
+    return (
+      <div className="p-6">
+        <p className="text-lg text-muted-foreground">No data loaded. <a href="#/" className="underline text-primary">Upload data</a> first.</p>
+      </div>
+    )
   }
 
   return (
@@ -269,28 +265,32 @@ export default function SiteComparisonPage() {
           <div className="flex flex-wrap items-center gap-4">
             <DateRangePicker />
             <GranularityToggle />
-            <MetricPicker />
-            <div className="ml-auto flex gap-1 rounded-lg border p-1">
-              <Button
-                variant={displayMode === 'overlay' ? 'default' : 'ghost'}
-                size="sm"
-                onClick={() => setDisplayMode('overlay')}
-              >
-                <Layers className="mr-1 h-3.5 w-3.5" />
-                Overlay
-              </Button>
-              <Button
-                variant={displayMode === 'sideBySide' ? 'default' : 'ghost'}
-                size="sm"
-                onClick={() => setDisplayMode('sideBySide')}
-              >
-                <LayoutGrid className="mr-1 h-3.5 w-3.5" />
-                Side by Side
-              </Button>
-            </div>
+            {selectedMetrics.length > 1 && (
+              <div className="ml-auto flex gap-1 rounded-lg border p-1">
+                <Button
+                  variant={chartMode === 'overlay' ? 'default' : 'ghost'}
+                  size="sm"
+                  onClick={() => setChartMode('overlay')}
+                >
+                  <Layers className="mr-1 h-3.5 w-3.5" />
+                  Overlay
+                </Button>
+                <Button
+                  variant={chartMode === 'split' ? 'default' : 'ghost'}
+                  size="sm"
+                  onClick={() => setChartMode('split')}
+                >
+                  <LayoutGrid className="mr-1 h-3.5 w-3.5" />
+                  Split
+                </Button>
+              </div>
+            )}
           </div>
         </CardContent>
       </Card>
+
+      {/* Multi-metric picker */}
+      <MultiMetricPicker selected={selectedMetrics} onChange={setSelectedMetrics} max={4} />
 
       {/* Summary stats table */}
       {summaryStats.length > 0 && !tsLoading && (
@@ -303,12 +303,12 @@ export default function SiteComparisonPage() {
               <TableHeader>
                 <TableRow>
                   <TableHead>Site</TableHead>
-                  <TableHead>Samples</TableHead>
-                  <TableHead>Mean</TableHead>
-                  <TableHead>Max</TableHead>
-                  <TableHead>Min</TableHead>
+                  <TableHead>Data Points</TableHead>
+                  <TableHead>Mean {METRIC_STAT_LABELS[selectedMetrics[0]]?.name ?? selectedMetrics[0]} ({METRIC_STAT_LABELS[selectedMetrics[0]]?.unit ?? ''})</TableHead>
+                  <TableHead>Max ({METRIC_STAT_LABELS[selectedMetrics[0]]?.unit ?? ''})</TableHead>
+                  <TableHead>Min ({METRIC_STAT_LABELS[selectedMetrics[0]]?.unit ?? ''})</TableHead>
                   <TableHead>Std Dev</TableHead>
-                  <TableHead>Total</TableHead>
+                  {selectedMetrics[0] === 'energy_produced' && <TableHead>Total ({METRIC_STAT_LABELS[selectedMetrics[0]]?.unit ?? ''})</TableHead>}
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -317,13 +317,23 @@ export default function SiteComparisonPage() {
                     key={s.siteId}
                     className={s.siteId === bestSite ? 'bg-green-50 dark:bg-green-950/30' : ''}
                   >
-                    <TableCell className="font-medium">{s.siteId}</TableCell>
+                    <TableCell className="font-medium">
+                      <a
+                        href={`https://enlighten.enphaseenergy.com/admin/sites/${s.siteId}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1 text-primary underline-offset-4 hover:underline"
+                      >
+                        {s.siteId}
+                        <ExternalLink className="h-3 w-3" />
+                      </a>
+                    </TableCell>
                     <TableCell>{s.count.toLocaleString()}</TableCell>
                     <TableCell>{fmt(s.mean)}</TableCell>
                     <TableCell>{fmt(s.max)}</TableCell>
                     <TableCell>{fmt(s.min)}</TableCell>
                     <TableCell>{fmt(s.stdDev)}</TableCell>
-                    <TableCell>{fmt(s.totalEnergy)}</TableCell>
+                    {selectedMetrics[0] === 'energy_produced' && <TableCell>{fmt(s.totalEnergy)}</TableCell>}
                   </TableRow>
                 ))}
               </TableBody>
@@ -332,56 +342,39 @@ export default function SiteComparisonPage() {
         </Card>
       )}
 
-      {/* Main chart */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">
-            {METRIC_LABELS[metric] ?? metric} — {displayMode === 'overlay' ? 'Overlay' : 'Side by Side'}
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          {tsLoading ? (
+      {/* Charts */}
+      {tsLoading ? (
+        <Card>
+          <CardContent>
             <div className="flex items-center justify-center py-20 text-muted-foreground">
               <Loader2 className="mr-2 h-5 w-5 animate-spin" />
               Loading chart data…
             </div>
-          ) : displayMode === 'overlay' ? (
-            <LineChart option={overlayOption} height={420} />
-          ) : (
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-              {sideBySideOptions.map((opt, i) => (
-                <LineChart key={selectedSites[i]} option={opt} height={300} />
-              ))}
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* Secondary metric strips */}
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-sm">AC Voltage Stability</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <LineChart
-              option={buildSecondaryOption(voltageData, 'AC Voltage (V)')}
-              height={220}
-            />
           </CardContent>
         </Card>
+      ) : chartMode === 'overlay' || selectedMetrics.length === 1 ? (
         <Card>
           <CardHeader>
-            <CardTitle className="text-sm">AC Frequency Stability</CardTitle>
+            <CardTitle className="text-base">
+              {selectedMetrics.map((m) => METRIC_LABELS[m] ?? m).join(' + ')}
+            </CardTitle>
           </CardHeader>
           <CardContent>
-            <LineChart
-              option={buildSecondaryOption(freqData, 'AC Frequency (Hz)')}
-              height={220}
-            />
+            <LineChart option={selectedMetrics.length === 1 ? (splitChartOptions[0]?.option ?? {}) : overlayChartOption} height={420} />
           </CardContent>
         </Card>
-      </div>
+      ) : (
+        splitChartOptions.map(({ metric: m, option }) => (
+          <Card key={m}>
+            <CardHeader>
+              <CardTitle className="text-base">{METRIC_LABELS[m] ?? m}</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <LineChart option={option} height={360} />
+            </CardContent>
+          </Card>
+        ))
+      )}
       </div>
     </div>
   )

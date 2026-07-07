@@ -35,7 +35,7 @@ const PREVIEW_COLUMNS: { key: keyof TelemetryRow; label: string }[] = [
   { key: 'dc_voltage', label: 'DC V' },
   { key: 'dc_current', label: 'DC A' },
   { key: 'ac_voltage', label: 'AC V' },
-  { key: 'energy_produced', label: 'Energy (Wh)' },
+  { key: 'energy_produced', label: 'Energy (kWh)' },
   { key: 'temperature_f', label: 'Temp (F)' },
 ]
 

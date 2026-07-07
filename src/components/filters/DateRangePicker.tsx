@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import { CalendarDays } from 'lucide-react'
 import { format } from 'date-fns'
 import { Button } from '@/components/ui/button'
@@ -9,17 +9,30 @@ export default function DateRangePicker() {
   const dateRange = useDataStore((s) => s.dateRange)
   const setDateRange = useDataStore((s) => s.setDateRange)
 
-  const [fromStr, setFromStr] = useState(
-    dateRange ? format(dateRange.from, 'yyyy-MM-dd') : ''
-  )
-  const [toStr, setToStr] = useState(
-    dateRange ? format(dateRange.to, 'yyyy-MM-dd') : ''
-  )
+  const [fromStr, setFromStr] = useState(() => {
+    try { return dateRange ? format(dateRange.from, 'yyyy-MM-dd') : '' } catch { return '' }
+  })
+  const [toStr, setToStr] = useState(() => {
+    try { return dateRange ? format(dateRange.to, 'yyyy-MM-dd') : '' } catch { return '' }
+  })
+
+  // Sync with store when dateRange changes externally (e.g. after upload)
+  useEffect(() => {
+    try {
+      if (dateRange) {
+        setFromStr(format(dateRange.from, 'yyyy-MM-dd'))
+        setToStr(format(dateRange.to, 'yyyy-MM-dd'))
+      }
+    } catch { /* ignore format errors */ }
+  }, [dateRange])
 
   const handleApply = useCallback(() => {
     if (!fromStr || !toStr) return
-    const from = new Date(fromStr)
-    const to = new Date(toStr)
+    // Parse as local date (not UTC) to avoid timezone shift
+    const [fy, fm, fd] = fromStr.split('-').map(Number)
+    const [ty, tm, td] = toStr.split('-').map(Number)
+    const from = new Date(fy, fm - 1, fd)
+    const to = new Date(ty, tm - 1, td)
     if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime())) return
     const range: DateRange = { from, to }
     setDateRange(range)

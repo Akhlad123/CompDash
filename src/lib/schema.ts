@@ -4,6 +4,7 @@ export interface TelemetryRow {
   serial_number: string
   site_id: string
   timestamp: string
+  local_date: string | null
   ac_voltage: number | null
   ac_frequency: number | null
   temperature_f: number | null
@@ -38,7 +39,7 @@ export const REQUIRED_FIELDS: FieldDescriptor[] = [
     key: 'timestamp',
     label: 'Timestamp',
     description: 'Local time (5 or 15-min granularity)',
-    aliases: ['timestamp', 'datetime', 'date', 'time', 'localtimestamp', 'localtime', 'readingtime'],
+    aliases: ['timestamp', 'datetime', 'time', 'localtimestamp', 'localtime', 'readingtime'],
   },
   {
     key: 'ac_voltage',
@@ -90,6 +91,12 @@ const OPTIONAL_FIELDS: FieldDescriptor[] = [
     label: 'SKU / Model Name',
     description: 'Optional model name',
     aliases: ['sku', 'skuname', 'model', 'modelname', 'productname', 'invertermodel'],
+  },
+  {
+    key: 'local_date',
+    label: 'Local Date',
+    description: 'Date of reading (YYYY-MM-DD)',
+    aliases: ['localdate', 'date', 'readingdate', 'reportdate', 'reportingdate'],
   },
 ]
 
@@ -217,10 +224,14 @@ export function applyMapping(
     const skuCol = mapping['sku_name']
     const skuName = skuCol ? (raw[skuCol] || null) : null
 
+    const localDateCol = mapping['local_date']
+    const localDate = localDateCol ? (raw[localDateCol] || null) : null
+
     result.push({
       serial_number: serial,
       site_id: siteId,
       timestamp,
+      local_date: localDate,
       ac_voltage: numValues['ac_voltage'] ?? null,
       ac_frequency: numValues['ac_frequency'] ?? null,
       temperature_f: numValues['temperature_f'] ?? null,

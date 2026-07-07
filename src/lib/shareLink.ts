@@ -69,10 +69,14 @@ export function applyStateFromURL(): ShareState | null {
   if (state.granularity) ui.setGranularity(state.granularity as Granularity)
 
   if (state.dateRange) {
+    const parseLocal = (s: string) => {
+      const parts = s.slice(0, 10).split('-').map(Number)
+      return new Date(parts[0], parts[1] - 1, parts[2])
+    }
     const dataStore = useDataStore.getState()
     dataStore.setDateRange({
-      from: new Date(state.dateRange.from),
-      to: new Date(state.dateRange.to),
+      from: parseLocal(state.dateRange.from),
+      to: parseLocal(state.dateRange.to),
     })
   }
 

@@ -1,13 +1,12 @@
 import { useQuery } from '@tanstack/react-query'
 import { query } from '@/lib/duckdb'
-import { QUERY_SITE_SUMMARY } from '@/lib/queries'
+import { buildSiteSummaryQuery } from '@/lib/queries'
 import { useDataStore } from '@/store/dataStore'
 
 export interface SiteSummaryRow {
   site_id: string
   inverter_count: number
   total_energy: number
-  avg_ac_power: number
   avg_dc_power: number
   avg_temperature: number
   first_timestamp: string
@@ -17,10 +16,14 @@ export interface SiteSummaryRow {
 
 export function useSiteStats() {
   const isDataLoaded = useDataStore((s) => s.isDataLoaded)
+  const dateRange = useDataStore((s) => s.dateRange)
 
   return useQuery<SiteSummaryRow[]>({
-    queryKey: ['siteSummary'],
-    queryFn: () => query<SiteSummaryRow>(QUERY_SITE_SUMMARY),
+    queryKey: ['siteSummary', dateRange?.from?.toISOString(), dateRange?.to?.toISOString()],
+    queryFn: () => {
+      const sql = buildSiteSummaryQuery(dateRange)
+      return query<SiteSummaryRow>(sql)
+    },
     enabled: isDataLoaded,
   })
 }

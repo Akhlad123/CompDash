@@ -34,6 +34,7 @@ import {
 } from '@/lib/schema'
 import type { TelemetryRow, ValidationWarning } from '@/lib/schema'
 import { ingestData } from '@/lib/duckdb'
+import { saveSession } from '@/lib/sessionStore'
 import { useDataStore } from '@/store/dataStore'
 import type { InverterInfo } from '@/store/dataStore'
 
@@ -190,9 +191,17 @@ export default function UploadPage() {
         })
       }
       setDataLoaded(true)
-
       setIngestProgress('Done!')
       navigate('/overview')
+
+      saveSession(
+        rowsWithSKU,
+        sites,
+        [...inverterMap.values()],
+        timestamps.length > 0
+          ? { from: new Date(timestamps[0]), to: new Date(timestamps[timestamps.length - 1]) }
+          : null
+      ).catch((err) => console.warn('Session save failed (non-critical):', err))
     } catch (err) {
       console.error('Ingest failed:', err)
       setIngestProgress(`Error: ${err instanceof Error ? err.message : String(err)}`)
@@ -404,12 +413,14 @@ export default function UploadPage() {
             loading={ingesting}
           />
 
-          {ingesting && (
-            <Card>
+          {(ingesting || ingestProgress.startsWith('Error')) && (
+            <Card className={ingestProgress.startsWith('Error') ? 'border-red-300' : ''}>
               <CardContent className="flex flex-col items-center gap-3 py-6">
-                <Loader2 className="h-8 w-8 animate-spin text-primary" />
-                <p className="text-sm font-medium">{ingestProgress}</p>
-                <Progress value={null} className="w-64" />
+                {ingesting && <Loader2 className="h-8 w-8 animate-spin text-primary" />}
+                <p className={`text-sm font-medium ${ingestProgress.startsWith('Error') ? 'text-red-600' : ''}`}>
+                  {ingestProgress}
+                </p>
+                {ingesting && <Progress value={null} className="w-64" />}
               </CardContent>
             </Card>
           )}

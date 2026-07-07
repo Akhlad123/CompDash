@@ -1,10 +1,5 @@
-import { useMemo, useState, useCallback } from 'react'
-import { Navigate, useNavigate } from 'react-router-dom'
-import ReactEChartsCore from 'echarts-for-react/lib/core'
-import * as echarts from 'echarts/core'
-import { LineChart } from 'echarts/charts'
-import { GridComponent } from 'echarts/components'
-import { CanvasRenderer } from 'echarts/renderers'
+import { useMemo, useState, useCallback, Fragment, Component, type ReactNode, type ErrorInfo } from 'react'
+import { useNavigate } from 'react-router-dom'
 import {
   MapPin,
   Cpu,
@@ -14,8 +9,11 @@ import {
   ArrowRight,
   AlertTriangle,
   Loader2,
+  ChevronRight,
+  ChevronDown,
+  ExternalLink,
 } from 'lucide-react'
-import { format } from 'date-fns'
+import { useQuery } from '@tanstack/react-query'
 import { Button } from '@/components/ui/button'
 import {
   Table,
@@ -31,49 +29,143 @@ import DateRangePicker from '@/components/filters/DateRangePicker'
 import GranularityToggle from '@/components/filters/GranularityToggle'
 import ExportToolbar from '@/components/export/ExportToolbar'
 import { useDataStore } from '@/store/dataStore'
-import { useUIStore } from '@/store/uiStore'
 import { useKPITotals } from '@/hooks/useKPITotals'
 import { useSiteStats } from '@/hooks/useSiteStats'
 import { useDailySiteEnergy } from '@/hooks/useDailySiteEnergy'
+import { query as duckQuery } from '@/lib/duckdb'
+import { buildDateFilter } from '@/lib/queries'
 import type { SiteSummaryRow } from '@/hooks/useSiteStats'
-
-echarts.use([LineChart, GridComponent, CanvasRenderer])
 
 type SortKey = keyof Pick<
   SiteSummaryRow,
   | 'site_id'
   | 'inverter_count'
   | 'total_energy'
-  | 'avg_ac_power'
   | 'avg_dc_power'
   | 'avg_temperature'
 >
 
-function formatEnergy(wh: number): string {
-  const kwh = wh / 1000
+interface InverterEnergyRow {
+  serial_number: string
+  site_id: string
+  sku_name: string | null
+  total_energy: number
+}
+
+function safe(n: unknown): number {
+  if (n === null || n === undefined) return 0
+  const v = Number(n)
+  return Number.isFinite(v) ? v : 0
+}
+
+function formatEnergy(wh: unknown): string {
+  const kwh = safe(wh) / 1000
   if (kwh >= 1_000_000) return `${(kwh / 1_000_000).toFixed(1)} GWh`
   if (kwh >= 1_000) return `${(kwh / 1_000).toFixed(1)} MWh`
   return `${kwh.toFixed(1)} kWh`
 }
 
-function formatNum(n: number, decimals = 1): string {
-  return n.toLocaleString(undefined, {
+function formatNum(n: unknown, decimals = 1): string {
+  return safe(n).toLocaleString(undefined, {
     minimumFractionDigits: decimals,
     maximumFractionDigits: decimals,
   })
 }
 
+function formatDate(d: unknown): string {
+  if (!d) return ''
+  try {
+    const date = new Date(String(d))
+    if (Number.isNaN(date.getTime())) return String(d)
+    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+  } catch {
+    return String(d)
+  }
+}
+
+class OverviewErrorBoundary extends Component<
+  { children: ReactNode },
+  { error: Error | null }
+> {
+  constructor(props: { children: ReactNode }) {
+    super(props)
+    this.state = { error: null }
+  }
+  static getDerivedStateFromError(error: unknown) {
+    return { error: error instanceof Error ? error : new Error(String(error)) }
+  }
+  componentDidCatch(error: unknown, info: ErrorInfo) {
+    console.error('[OverviewPage Error]', error, info.componentStack)
+  }
+  render() {
+    if (this.state.error) {
+      return (
+        <div className="space-y-4 p-6">
+          <h1 className="text-3xl font-bold tracking-tight">Overview</h1>
+          <div className="rounded-lg border border-red-300 bg-red-50 p-4 text-red-800 dark:border-red-700 dark:bg-red-950 dark:text-red-200">
+            <p className="font-semibold">Render Error</p>
+            <pre className="mt-2 whitespace-pre-wrap text-sm">{this.state.error.message}</pre>
+            <pre className="mt-2 whitespace-pre-wrap text-xs opacity-60">{this.state.error.stack}</pre>
+          </div>
+        </div>
+      )
+    }
+    return this.props.children
+  }
+}
+
 export default function OverviewPage() {
+  return (
+    <OverviewErrorBoundary>
+      <OverviewContent />
+    </OverviewErrorBoundary>
+  )
+}
+
+function OverviewContent() {
   const navigate = useNavigate()
   const isDataLoaded = useDataStore((s) => s.isDataLoaded)
-  const setSelectedSites = useUIStore((s) => s.setSelectedSites)
+  const dateRange = useDataStore((s) => s.dateRange)
 
-  const { data: kpi, isLoading: kpiLoading } = useKPITotals()
-  const { data: sites, isLoading: sitesLoading } = useSiteStats()
+  const { data: kpi, isLoading: kpiLoading, error: kpiError } = useKPITotals()
+  const { data: sites, isLoading: sitesLoading, error: sitesError } = useSiteStats()
   const { data: dailyEnergy } = useDailySiteEnergy()
+
+  const { data: inverterEnergy } = useQuery<InverterEnergyRow[]>({
+    queryKey: ['inverterEnergy', dateRange?.from?.toISOString(), dateRange?.to?.toISOString()],
+    queryFn: () => {
+      const df = buildDateFilter(dateRange)
+      const sql = `SELECT serial_number, site_id, sku_name, SUM(energy_produced) AS total_energy FROM telemetry WHERE 1=1 ${df} GROUP BY serial_number, site_id, sku_name ORDER BY site_id, serial_number`
+      return duckQuery<InverterEnergyRow>(sql)
+    },
+    enabled: isDataLoaded,
+  })
+
+  const invertersBySite = useMemo(() => {
+    const map = new Map<string, InverterEnergyRow[]>()
+    if (!inverterEnergy) return map
+    for (const row of inverterEnergy) {
+      const list = map.get(row.site_id) ?? []
+      list.push(row)
+      map.set(row.site_id, list)
+    }
+    return map
+  }, [inverterEnergy])
+
+  const queryError = kpiError || sitesError
 
   const [sortKey, setSortKey] = useState<SortKey>('site_id')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
+  const [expandedSites, setExpandedSites] = useState<Set<string>>(new Set())
+
+  const toggleExpand = useCallback((siteId: string) => {
+    setExpandedSites((prev) => {
+      const next = new Set(prev)
+      if (next.has(siteId)) next.delete(siteId)
+      else next.add(siteId)
+      return next
+    })
+  }, [])
 
   const handleSort = useCallback(
     (key: SortKey) => {
@@ -98,7 +190,7 @@ export default function OverviewPage() {
           ? aVal.localeCompare(bVal)
           : bVal.localeCompare(aVal)
       }
-      const diff = (aVal as number) - (bVal as number)
+      const diff = safe(aVal) - safe(bVal)
       return sortDir === 'asc' ? diff : -diff
     })
     return sorted
@@ -109,7 +201,7 @@ export default function OverviewPage() {
     const grouped = new Map<string, { date: string; energy: number }[]>()
     for (const row of dailyEnergy) {
       const list = grouped.get(row.site_id) ?? []
-      list.push({ date: row.date, energy: row.daily_energy })
+      list.push({ date: String(row.date ?? ''), energy: safe(row.daily_energy) })
       grouped.set(row.site_id, list)
     }
     const result = new Map<string, number[]>()
@@ -122,28 +214,28 @@ export default function OverviewPage() {
   }, [dailyEnergy])
 
   if (!isDataLoaded) {
-    return <Navigate to="/" replace />
+    return (
+      <div className="p-6">
+        <p className="text-lg text-muted-foreground">No data loaded. <a href="#/" className="underline text-primary">Upload data</a> first.</p>
+      </div>
+    )
+  }
+
+  if (queryError) {
+    return (
+      <div className="space-y-4 p-6">
+        <h1 className="text-3xl font-bold tracking-tight">Overview</h1>
+        <div className="rounded-lg border border-red-300 bg-red-50 p-4 text-red-800">
+          <p className="font-semibold">Query Error</p>
+          <pre className="mt-2 whitespace-pre-wrap text-sm">
+            {queryError instanceof Error ? queryError.message : JSON.stringify(queryError)}
+          </pre>
+        </div>
+      </div>
+    )
   }
 
   const loading = kpiLoading || sitesLoading
-
-  const SortHeader = ({
-    label,
-    field,
-  }: {
-    label: string
-    field: SortKey
-  }) => (
-    <TableHead
-      className="cursor-pointer select-none"
-      onClick={() => handleSort(field)}
-    >
-      <span className="flex items-center gap-1">
-        {label}
-        <ArrowUpDown className="h-3 w-3 text-muted-foreground" />
-      </span>
-    </TableHead>
-  )
 
   return (
     <div className="space-y-6">
@@ -156,7 +248,7 @@ export default function OverviewPage() {
         />
       </div>
 
-      <div id="overview-content">
+      <div id="overview-content" className="space-y-6">
       {/* KPI Cards */}
       {loading ? (
         <div className="flex items-center gap-2 text-muted-foreground">
@@ -168,12 +260,12 @@ export default function OverviewPage() {
           <KPICard
             icon={MapPin}
             label="Total Sites"
-            value={String(kpi.total_sites)}
+            value={String(safe(kpi.total_sites))}
           />
           <KPICard
             icon={Cpu}
             label="Total Microinverters"
-            value={String(kpi.total_inverters)}
+            value={String(safe(kpi.total_inverters))}
           />
           <KPICard
             icon={Zap}
@@ -185,7 +277,7 @@ export default function OverviewPage() {
             label="Date Range"
             value={
               kpi.date_from && kpi.date_to
-                ? `${format(new Date(kpi.date_from), 'MMM d, yyyy')} — ${format(new Date(kpi.date_to), 'MMM d, yyyy')}`
+                ? `${formatDate(kpi.date_from)} — ${formatDate(kpi.date_to)}`
                 : 'N/A'
             }
           />
@@ -193,12 +285,23 @@ export default function OverviewPage() {
       ) : null}
 
       {/* Filter bar */}
-      <div className="sticky top-0 z-10 flex flex-wrap items-center gap-4 rounded-lg border bg-background/95 px-4 py-3 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-        <DateRangePicker />
-        <div className="ml-auto">
-          <GranularityToggle />
-        </div>
-      </div>
+      <Card>
+        <CardContent className="flex flex-wrap items-center gap-4 pt-4 pb-4">
+          <div className="flex items-center gap-2">
+            <CalendarDays className="h-4 w-4 text-muted-foreground" />
+            <span className="text-sm font-medium">Date Range:</span>
+          </div>
+          <DateRangePicker />
+          {dateRange && (
+            <span className="rounded-md bg-primary/10 px-2 py-1 text-xs font-medium text-primary">
+              {formatDate(dateRange.from)} — {formatDate(dateRange.to)}
+            </span>
+          )}
+          <div className="ml-auto">
+            <GranularityToggle />
+          </div>
+        </CardContent>
+      </Card>
 
       {/* Site Summary Table */}
       <Card>
@@ -221,42 +324,89 @@ export default function OverviewPage() {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <SortHeader label="Site ID" field="site_id" />
-                    <SortHeader label="# Inverters" field="inverter_count" />
-                    <SortHeader label="Total Energy (kWh)" field="total_energy" />
-                    <SortHeader label="Avg AC Power (W)" field="avg_ac_power" />
-                    <SortHeader label="Avg DC Power (W)" field="avg_dc_power" />
-                    <SortHeader label="Avg Temp (°F)" field="avg_temperature" />
-                    <TableHead>7-Day Sparkline</TableHead>
+                    <TableHead className="w-8"></TableHead>
+                    <TableHead className="cursor-pointer select-none" onClick={() => handleSort('site_id')}>
+                      <span className="flex items-center gap-1">Site ID <ArrowUpDown className="h-3 w-3 text-muted-foreground" /></span>
+                    </TableHead>
+                    <TableHead className="cursor-pointer select-none" onClick={() => handleSort('inverter_count')}>
+                      <span className="flex items-center gap-1"># Inverters <ArrowUpDown className="h-3 w-3 text-muted-foreground" /></span>
+                    </TableHead>
+                    <TableHead className="cursor-pointer select-none" onClick={() => handleSort('total_energy')}>
+                      <span className="flex items-center gap-1">Total Energy (kWh) <ArrowUpDown className="h-3 w-3 text-muted-foreground" /></span>
+                    </TableHead>
+                    <TableHead className="cursor-pointer select-none" onClick={() => handleSort('avg_dc_power')}>
+                      <span className="flex items-center gap-1">Avg DC Power (W) <ArrowUpDown className="h-3 w-3 text-muted-foreground" /></span>
+                    </TableHead>
+                    <TableHead className="cursor-pointer select-none" onClick={() => handleSort('avg_temperature')}>
+                      <span className="flex items-center gap-1">Avg Temp (°C) <ArrowUpDown className="h-3 w-3 text-muted-foreground" /></span>
+                    </TableHead>
+                    <TableHead>7-Day Trend</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {sortedSites.map((site) => (
-                    <TableRow
-                      key={site.site_id}
-                      className="cursor-pointer hover:bg-muted/50"
-                      onClick={() => {
-                        setSelectedSites([site.site_id])
-                        navigate('/sites')
-                      }}
-                    >
-                      <TableCell className="font-medium">
-                        {site.site_id}
-                      </TableCell>
-                      <TableCell>{site.inverter_count}</TableCell>
-                      <TableCell>
-                        {formatNum(site.total_energy / 1000)}
-                      </TableCell>
-                      <TableCell>{formatNum(site.avg_ac_power)}</TableCell>
-                      <TableCell>{formatNum(site.avg_dc_power)}</TableCell>
-                      <TableCell>{formatNum(site.avg_temperature)}</TableCell>
-                      <TableCell>
-                        <Sparkline
-                          data={sparklineMap.get(site.site_id) ?? []}
-                        />
-                      </TableCell>
-                    </TableRow>
-                  ))}
+                  {sortedSites.map((site) => {
+                    const isExpanded = expandedSites.has(site.site_id)
+                    const siteInverters = invertersBySite.get(site.site_id) ?? []
+                    return (
+                      <Fragment key={site.site_id}>
+                        <TableRow
+                          className="cursor-pointer hover:bg-muted/50"
+                        >
+                          <TableCell
+                            className="w-8 px-2"
+                            onClick={(e) => { e.stopPropagation(); toggleExpand(site.site_id) }}
+                          >
+                            {isExpanded
+                              ? <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                              : <ChevronRight className="h-4 w-4 text-muted-foreground" />}
+                          </TableCell>
+                          <TableCell className="font-medium">
+                            <a
+                              href={`https://enlighten.enphaseenergy.com/admin/sites/${site.site_id}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center gap-1 text-primary underline-offset-4 hover:underline"
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              {site.site_id}
+                              <ExternalLink className="h-3 w-3" />
+                            </a>
+                          </TableCell>
+                          <TableCell>{safe(site.inverter_count)}</TableCell>
+                          <TableCell>{formatNum(safe(site.total_energy) / 1000)}</TableCell>
+                          <TableCell>{formatNum(site.avg_dc_power)}</TableCell>
+                          <TableCell>{formatNum(site.avg_temperature)}</TableCell>
+                          <TableCell>
+                            {(() => {
+                              const vals = sparklineMap.get(site.site_id) ?? []
+                              if (vals.length === 0) return <span className="text-xs text-muted-foreground">—</span>
+                              const max = Math.max(...vals)
+                              return (
+                                <div className="flex h-8 items-end gap-px">
+                                  {vals.map((v, i) => (
+                                    <div
+                                      key={i}
+                                      className="w-2 rounded-t bg-primary/60"
+                                      style={{ height: `${max > 0 ? (v / max) * 100 : 0}%`, minHeight: 2 }}
+                                    />
+                                  ))}
+                                </div>
+                              )
+                            })()}
+                          </TableCell>
+                        </TableRow>
+                        {isExpanded && siteInverters.map((inv) => (
+                          <TableRow key={`${site.site_id}-${inv.serial_number}`} className="bg-muted/30">
+                            <TableCell></TableCell>
+                            <TableCell className="pl-8 text-xs font-mono text-muted-foreground">{inv.serial_number}</TableCell>
+                            <TableCell className="text-xs text-muted-foreground">{inv.sku_name ?? '—'}</TableCell>
+                            <TableCell className="text-xs">{formatNum(safe(inv.total_energy) / 1000)}</TableCell>
+                            <TableCell colSpan={3}></TableCell>
+                          </TableRow>
+                        ))}
+                      </Fragment>
+                    )
+                  })}
                 </TableBody>
               </Table>
             </div>
@@ -278,44 +428,5 @@ export default function OverviewPage() {
         </Button>
       </div>
     </div>
-  )
-}
-
-function Sparkline({ data }: { data: number[] }) {
-  if (data.length === 0) {
-    return <span className="text-xs text-muted-foreground">—</span>
-  }
-
-  const option = {
-    grid: { top: 2, right: 2, bottom: 2, left: 2 },
-    xAxis: { type: 'category' as const, show: false },
-    yAxis: { type: 'value' as const, show: false },
-    series: [
-      {
-        type: 'line' as const,
-        data,
-        smooth: true,
-        symbol: 'none',
-        lineStyle: { width: 1.5, color: 'hsl(var(--primary))' },
-        areaStyle: {
-          color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-            { offset: 0, color: 'hsl(var(--primary) / 0.3)' },
-            { offset: 1, color: 'hsl(var(--primary) / 0.05)' },
-          ]),
-        },
-      },
-    ],
-    tooltip: { show: false },
-  }
-
-  return (
-    <ReactEChartsCore
-      echarts={echarts}
-      option={option}
-      style={{ width: 100, height: 40 }}
-      opts={{ renderer: 'canvas' }}
-      notMerge
-      lazyUpdate
-    />
   )
 }

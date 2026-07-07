@@ -20,9 +20,24 @@ export function parseCSV(file: File): Promise<ParseResult> {
   })
 }
 
+function formatCellValue(val: unknown): string {
+  if (val === null || val === undefined) return ''
+  if (val instanceof Date) {
+    // Format as YYYY-MM-DD HH:mm:ss using local time (no timezone shift)
+    const y = val.getFullYear()
+    const mo = String(val.getMonth() + 1).padStart(2, '0')
+    const d = String(val.getDate()).padStart(2, '0')
+    const h = String(val.getHours()).padStart(2, '0')
+    const mi = String(val.getMinutes()).padStart(2, '0')
+    const s = String(val.getSeconds()).padStart(2, '0')
+    return `${y}-${mo}-${d} ${h}:${mi}:${s}`
+  }
+  return String(val)
+}
+
 export async function parseExcel(file: File): Promise<ParseResult> {
   const buffer = await file.arrayBuffer()
-  const workbook = XLSX.read(buffer, { type: 'array' })
+  const workbook = XLSX.read(buffer, { type: 'array', cellDates: true })
   const sheetName = workbook.SheetNames[0]
   if (!sheetName) {
     return { headers: [], rows: [] }
@@ -30,6 +45,8 @@ export async function parseExcel(file: File): Promise<ParseResult> {
   const sheet = workbook.Sheets[sheetName]
   const jsonRows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, {
     defval: '',
+    raw: false,
+    dateNF: 'yyyy-mm-dd hh:mm:ss',
   })
 
   if (jsonRows.length === 0) {
@@ -40,7 +57,7 @@ export async function parseExcel(file: File): Promise<ParseResult> {
   const rows = jsonRows.map((row) => {
     const out: Record<string, string> = {}
     for (const key of headers) {
-      out[key] = row[key] === null || row[key] === undefined ? '' : String(row[key])
+      out[key] = formatCellValue(row[key])
     }
     return out
   })

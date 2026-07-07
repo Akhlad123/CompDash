@@ -1,4 +1,4 @@
-import { StrictMode, useEffect, useState } from 'react'
+import { StrictMode, useEffect, Component, type ReactNode, type ErrorInfo } from 'react'
 import { createRoot } from 'react-dom/client'
 import { HashRouter, Routes, Route } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
@@ -10,48 +10,135 @@ import SiteComparisonPage from '@/pages/SiteComparisonPage'
 import InverterDrilldownPage from '@/pages/InverterDrilldownPage'
 import TimeSeriesPage from '@/pages/TimeSeriesPage'
 import AnomalyPage from '@/pages/AnomalyPage'
+import DeveloperPage from '@/pages/DeveloperPage'
 import { applyStateFromURL } from '@/lib/shareLink'
-import { useDataStore } from '@/store/dataStore'
 import './index.css'
 
-const queryClient = new QueryClient()
+// Apply dark mode class before first paint
+;(() => {
+  const stored = localStorage.getItem('compdash_theme')
+  const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches
+  if (stored === 'dark' || (!stored && prefersDark)) {
+    document.documentElement.classList.add('dark')
+  }
+})()
 
-function SharedStateBanner() {
-  const isDataLoaded = useDataStore((s) => s.isDataLoaded)
-  const [hasSharedState, setHasSharedState] = useState(false)
+class GlobalErrorBoundary extends Component<
+  { children: ReactNode },
+  { error: Error | null; errorInfo: string }
+> {
+  constructor(props: { children: ReactNode }) {
+    super(props)
+    this.state = { error: null, errorInfo: '' }
+  }
+  static getDerivedStateFromError(error: unknown) {
+    return {
+      error: error instanceof Error ? error : new Error(String(error)),
+    }
+  }
+  componentDidCatch(error: unknown, info: ErrorInfo) {
+    console.error('[GlobalErrorBoundary]', error, info.componentStack)
+    this.setState({ errorInfo: info.componentStack ?? '' })
+  }
+  render() {
+    if (this.state.error) {
+      return (
+        <div style={{ padding: 32, fontFamily: 'system-ui, sans-serif' }}>
+          <h1 style={{ color: '#dc2626', fontSize: 24, marginBottom: 16 }}>
+            Something went wrong
+          </h1>
+          <div
+            style={{
+              background: '#fef2f2',
+              border: '1px solid #fca5a5',
+              borderRadius: 8,
+              padding: 16,
+              marginBottom: 16,
+            }}
+          >
+            <p style={{ fontWeight: 600, marginBottom: 8 }}>
+              {this.state.error.message}
+            </p>
+            <pre
+              style={{
+                fontSize: 12,
+                whiteSpace: 'pre-wrap',
+                maxHeight: 200,
+                overflow: 'auto',
+                opacity: 0.7,
+              }}
+            >
+              {this.state.error.stack}
+            </pre>
+          </div>
+          {this.state.errorInfo && (
+            <details>
+              <summary style={{ cursor: 'pointer', fontSize: 14, marginBottom: 8 }}>
+                Component Stack
+              </summary>
+              <pre style={{ fontSize: 11, whiteSpace: 'pre-wrap', opacity: 0.6 }}>
+                {this.state.errorInfo}
+              </pre>
+            </details>
+          )}
+          <button
+            onClick={() => {
+              this.setState({ error: null, errorInfo: '' })
+              window.location.hash = '#/'
+              window.location.reload()
+            }}
+            style={{
+              marginTop: 16,
+              padding: '8px 16px',
+              background: '#2563eb',
+              color: 'white',
+              border: 'none',
+              borderRadius: 6,
+              cursor: 'pointer',
+              fontSize: 14,
+            }}
+          >
+            Reload App
+          </button>
+        </div>
+      )
+    }
+    return this.props.children
+  }
+}
 
+const queryClient = new QueryClient({
+  defaultOptions: { queries: { retry: false, throwOnError: false } },
+})
+
+function AppInit() {
   useEffect(() => {
-    const restored = applyStateFromURL()
-    if (restored) setHasSharedState(true)
+    applyStateFromURL()
   }, [])
-
-  if (!hasSharedState || isDataLoaded) return null
-
-  return (
-    <div className="border-b border-amber-300 bg-amber-50 px-4 py-2 text-center text-sm text-amber-800 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-200">
-      Load data to restore this shared view
-    </div>
-  )
+  return null
 }
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <QueryClientProvider client={queryClient}>
-      <TooltipProvider>
-        <HashRouter>
-          <SharedStateBanner />
-          <Routes>
-            <Route element={<PageWrapper />}>
-              <Route path="/" element={<UploadPage />} />
-              <Route path="/overview" element={<OverviewPage />} />
-              <Route path="/sites" element={<SiteComparisonPage />} />
-              <Route path="/inverters" element={<InverterDrilldownPage />} />
-              <Route path="/timeseries" element={<TimeSeriesPage />} />
-              <Route path="/anomaly" element={<AnomalyPage />} />
-            </Route>
-          </Routes>
-        </HashRouter>
-      </TooltipProvider>
-    </QueryClientProvider>
+    <GlobalErrorBoundary>
+      <QueryClientProvider client={queryClient}>
+        <TooltipProvider>
+          <HashRouter>
+            <AppInit />
+            <Routes>
+              <Route element={<PageWrapper />}>
+                <Route path="/" element={<UploadPage />} />
+                <Route path="/overview" element={<OverviewPage />} />
+                <Route path="/sites" element={<SiteComparisonPage />} />
+                <Route path="/inverters" element={<InverterDrilldownPage />} />
+                <Route path="/timeseries" element={<TimeSeriesPage />} />
+                <Route path="/anomaly" element={<AnomalyPage />} />
+                <Route path="/developer" element={<DeveloperPage />} />
+              </Route>
+            </Routes>
+          </HashRouter>
+        </TooltipProvider>
+      </QueryClientProvider>
+    </GlobalErrorBoundary>
   </StrictMode>,
 )
