@@ -11,6 +11,7 @@ import InverterDrilldownPage from '@/pages/InverterDrilldownPage'
 import TimeSeriesPage from '@/pages/TimeSeriesPage'
 import AnomalyPage from '@/pages/AnomalyPage'
 import DeveloperPage from '@/pages/DeveloperPage'
+import BucketAnalysisPage from '@/pages/BucketAnalysisPage'
 import { applyStateFromURL } from '@/lib/shareLink'
 import './index.css'
 
@@ -133,6 +134,7 @@ createRoot(document.getElementById('root')!).render(
                 <Route path="/inverters" element={<InverterDrilldownPage />} />
                 <Route path="/timeseries" element={<TimeSeriesPage />} />
                 <Route path="/anomaly" element={<AnomalyPage />} />
+                <Route path="/buckets" element={<BucketAnalysisPage />} />
                 <Route path="/developer" element={<DeveloperPage />} />
               </Route>
             </Routes>

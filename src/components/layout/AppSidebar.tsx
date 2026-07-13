@@ -10,6 +10,7 @@ import {
   Zap,
   Trash2,
   Code2,
+  Rows3,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
@@ -24,6 +25,7 @@ const navItems = [
   { to: '/inverters', label: 'Inverter Drilldown', icon: Cpu },
   { to: '/timeseries', label: 'Time Series', icon: TrendingUp },
   { to: '/anomaly', label: 'Anomaly Detection', icon: AlertTriangle },
+  { to: '/buckets', label: 'Bucket Analysis', icon: Rows3 },
   { to: '/developer', label: 'Developer Mode', icon: Code2 },
 ]
 
