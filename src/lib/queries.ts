@@ -37,7 +37,7 @@ export const QUERY_INVERTER_SUMMARY = `
     CAST(MAX(timestamp) AS VARCHAR) AS last_timestamp,
     COUNT(*)                      AS row_count
   FROM telemetry
-  WHERE site_id = '{site_id}' {date_filter}
+  WHERE 1=1 {site_filter} {date_filter}
   GROUP BY serial_number, site_id, sku_name
   ORDER BY serial_number
 `
@@ -219,8 +219,11 @@ export function buildTimeseriesQuery(
 }
 
 export function buildInverterSummaryQuery(siteId: string, dateRange: { from: Date; to: Date } | null = null): string {
+  const siteFilter = siteId && siteId !== '__all__'
+    ? `AND site_id = '${siteId}'`
+    : ''
   return QUERY_INVERTER_SUMMARY
-    .replace('{site_id}', siteId)
+    .replace('{site_filter}', siteFilter)
     .replace('{date_filter}', buildDateFilter(dateRange))
 }
 
@@ -260,4 +263,43 @@ export function buildHeatmapMultiQuery(siteIds: string[]): string {
       ? `AND site_id IN (${siteIds.map((s) => `'${s}'`).join(', ')})`
       : ''
   return QUERY_HEATMAP_MULTI.replace('{site_filter}', siteFilter)
+}
+
+/**
+ * Hourly-aggregated AC power / DC current / DC voltage per inverter — the
+ * base series for Clipping Analysis. AC power is derived the same way as
+ * METRIC_EXPR.ac_power (energy_produced over duration); DC current/voltage
+ * are simple hourly averages. Grouped by calendar date too so clipping runs
+ * never spill across midnight.
+ */
+export const QUERY_CLIPPING_HOURLY = `
+  SELECT
+    site_id,
+    serial_number,
+    sku_name,
+    CAST(DATE_TRUNC('hour', timestamp) AS VARCHAR) AS hour,
+    CAST(CAST(timestamp AS DATE) AS VARCHAR)        AS date,
+    AVG(CASE WHEN duration > 0 THEN (energy_produced * 3600.0) / duration ELSE 0 END) AS ac_power,
+    AVG(dc_current) AS dc_current,
+    AVG(dc_voltage) AS dc_voltage,
+    AVG(temperature_f)  AS avg_temperature_f,
+    MAX(temperature_f)  AS max_temperature_f,
+    COUNT(*) AS sample_count
+  FROM telemetry
+  WHERE 1=1 {site_filter} {date_filter}
+  GROUP BY site_id, serial_number, sku_name, DATE_TRUNC('hour', timestamp), CAST(timestamp AS DATE)
+  ORDER BY serial_number, hour
+`
+
+export function buildClippingHourlyQuery(
+  siteIds: string[],
+  dateRange: { from: Date; to: Date } | null = null
+): string {
+  const siteFilter =
+    siteIds.length > 0
+      ? `AND site_id IN (${siteIds.map((s) => `'${s}'`).join(', ')})`
+      : ''
+  return QUERY_CLIPPING_HOURLY
+    .replace('{site_filter}', siteFilter)
+    .replace('{date_filter}', buildDateFilter(dateRange))
 }

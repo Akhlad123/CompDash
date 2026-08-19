@@ -1,4 +1,5 @@
 import { useMemo, useState, useCallback, useEffect } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { Search, Loader2, ExternalLink, Plus, Trash2, Layers, LayoutGrid } from 'lucide-react'
 import type { EChartsOption } from 'echarts'
 import { useQuery } from '@tanstack/react-query'
@@ -138,12 +139,19 @@ export default function InverterDrilldownPage() {
   const [thresholdLogic, setThresholdLogic] = useState<'AND' | 'OR'>('AND')
   const [thresholdDirection, setThresholdDirection] = useState<'below' | 'above'>('above')
 
-  // Default site
+  const [searchParams] = useSearchParams()
+
+  // Default site — deep-link ?site=<id> (e.g. cross-linked from Fleet QueryPage)
+  // takes precedence over the first-site fallback.
   useEffect(() => {
-    if (!siteId && allSites.length > 0) {
+    if (allSites.length === 0) return
+    const urlSite = searchParams.get('site')
+    if (urlSite && allSites.includes(urlSite)) {
+      setSiteId(urlSite)
+    } else if (!siteId) {
       setSiteId(allSites[0])
     }
-  }, [allSites, siteId])
+  }, [allSites, searchParams, siteId])
 
   const { data: stats, isLoading } = useInverterStats(siteId)
 
@@ -176,6 +184,7 @@ export default function InverterDrilldownPage() {
     queryKey: ['threshold', siteId, thresholdConditions, thresholdLogic, thresholdDirection, dateRange?.from?.toISOString(), dateRange?.to?.toISOString()],
     queryFn: async () => {
       const df = buildDateFilter(dateRange)
+      const sf = siteId && siteId !== '__all__' ? `site_id = '${siteId}'` : '1=1'
 
       if (thresholdDirection === 'above') {
         // ABOVE: For rows where param > threshold, compute marginal energy:
@@ -211,7 +220,7 @@ export default function InverterDrilldownPage() {
             COUNT(*) - SUM(CASE WHEN ${aboveWhere} THEN 1 ELSE 0 END) AS data_points_below,
             COUNT(*) AS total_data_points
           FROM telemetry
-          WHERE site_id = '${siteId}' ${df}
+          WHERE ${sf} ${df}
           GROUP BY serial_number, sku_name
           ORDER BY energy_above_kwh DESC
         `
@@ -244,7 +253,7 @@ export default function InverterDrilldownPage() {
               COUNT(*) AS day_points,
               ${maxExprs}
             FROM telemetry
-            WHERE site_id = '${siteId}' ${df}
+            WHERE ${sf} ${df}
             GROUP BY serial_number, sku_name, CAST(timestamp AS DATE)
           ),
           totals AS (
@@ -254,7 +263,7 @@ export default function InverterDrilldownPage() {
               SUM(energy_produced) / 1000.0 AS total_energy_kwh,
               COUNT(*) AS total_data_points
             FROM telemetry
-            WHERE site_id = '${siteId}' ${df}
+            WHERE ${sf} ${df}
             GROUP BY serial_number, sku_name
           )
           SELECT
@@ -506,6 +515,9 @@ export default function InverterDrilldownPage() {
               <SelectValue placeholder="Select site" />
             </SelectTrigger>
             <SelectContent>
+              <SelectItem value="__all__">
+                All Sites ({allSites.length})
+              </SelectItem>
               {allSites.map((s) => (
                 <SelectItem key={s} value={s}>
                   {s}
@@ -533,7 +545,7 @@ export default function InverterDrilldownPage() {
       <Card>
         <CardHeader>
           <CardTitle className="text-base">
-            Inverter Summary — {siteId}
+            Inverter Summary — {siteId === '__all__' ? 'All Sites' : siteId}
             {filtered.length > 0 && (
               <span className="ml-2 text-sm font-normal text-muted-foreground">
                 ({filtered.length} inverters)

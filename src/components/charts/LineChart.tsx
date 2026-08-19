@@ -1,6 +1,6 @@
 import { useRef, useEffect, useState } from 'react'
 import * as echarts from 'echarts/core'
-import { LineChart as ELineChart } from 'echarts/charts'
+import { LineChart as ELineChart, ScatterChart } from 'echarts/charts'
 import {
   GridComponent,
   TooltipComponent,
@@ -8,6 +8,7 @@ import {
   DataZoomComponent,
   ToolboxComponent,
   MarkLineComponent,
+  MarkAreaComponent,
   TitleComponent,
 } from 'echarts/components'
 import { CanvasRenderer } from 'echarts/renderers'
@@ -15,12 +16,14 @@ import type { EChartsOption } from 'echarts'
 
 echarts.use([
   ELineChart,
+  ScatterChart,
   GridComponent,
   TooltipComponent,
   LegendComponent,
   DataZoomComponent,
   ToolboxComponent,
   MarkLineComponent,
+  MarkAreaComponent,
   TitleComponent,
   CanvasRenderer,
 ])
