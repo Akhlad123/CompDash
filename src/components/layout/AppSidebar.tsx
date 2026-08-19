@@ -11,6 +11,7 @@ import {
   Trash2,
   Code2,
   Rows3,
+  Scissors,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
@@ -26,6 +27,7 @@ const navItems = [
   { to: '/timeseries', label: 'Time Series', icon: TrendingUp },
   { to: '/anomaly', label: 'Anomaly Detection', icon: AlertTriangle },
   { to: '/buckets', label: 'Bucket Analysis', icon: Rows3 },
+  { to: '/clipping', label: 'Clipping Analysis', icon: Scissors },
   { to: '/developer', label: 'Developer Mode', icon: Code2 },
 ]
 

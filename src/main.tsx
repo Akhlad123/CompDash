@@ -12,6 +12,7 @@ import TimeSeriesPage from '@/pages/TimeSeriesPage'
 import AnomalyPage from '@/pages/AnomalyPage'
 import DeveloperPage from '@/pages/DeveloperPage'
 import BucketAnalysisPage from '@/pages/BucketAnalysisPage'
+import ClippingAnalysisPage from '@/pages/ClippingAnalysisPage'
 import { applyStateFromURL } from '@/lib/shareLink'
 import './index.css'
 
@@ -135,6 +136,7 @@ createRoot(document.getElementById('root')!).render(
                 <Route path="/timeseries" element={<TimeSeriesPage />} />
                 <Route path="/anomaly" element={<AnomalyPage />} />
                 <Route path="/buckets" element={<BucketAnalysisPage />} />
+                <Route path="/clipping" element={<ClippingAnalysisPage />} />
                 <Route path="/developer" element={<DeveloperPage />} />
               </Route>
             </Routes>
